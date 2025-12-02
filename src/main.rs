@@ -80,7 +80,7 @@ async fn process_job(db: &DbClient, submission_id: i32) {
     let sub = match db.get_submission(submission_id).await {
         Ok(submission) => submission,
         Err(err) => {
-            eprintln!("Failed to fetch submission: {}", err);
+            eprintln!("Failed to fetch submission {}: {}", submission_id, err);
             return;
         }
     };
@@ -99,33 +99,47 @@ async fn process_job(db: &DbClient, submission_id: i32) {
     );
 
     let mut all_passed = true;
+    let mut final_output_for_db = String::new();
 
     for (i, input) in problem.inputs.iter().enumerate() {
         let expected = &problem.outputs[i];
 
         let result = runner::run_python(&sub.code, input).await;
+        let actual = result.stdout.trim().to_string();
 
-        let actual = result.stdout.trim();
-
-        if result.exit_code != 0 || actual != expected.trim() {
+        if result.exit_code != 0 {
             all_passed = false;
-            println!("Test Case {} Failed", i + 1);
+            final_output_for_db = result.stderr;
+            println!("\t❌ Runtime Error on Test {}", i + 1);
+            break;
+        }
+        // Check for Wrong Answer
+        else if actual != expected.trim() {
+            all_passed = false;
+            final_output_for_db = actual;
+            println!("\t❌ Wrong Answer on Test {}", i + 1);
+            break;
+        }
 
-            if result.exit_code != 0 {
-                println!("Exit Code: {}", result.exit_code);
-            } else {
-                println!("Expected Output: {}", expected);
-                println!("Actual Output: {}", actual);
-            }
-            break; // stop on first error
+        // If it's the last test and everything passed, save the last output
+        if i == problem.inputs.len() - 1 {
+            final_output_for_db = actual;
         }
     }
 
     let status = if all_passed { "PASSED" } else { "FAILED" };
 
-    if let Err(e) = db.update_submission_status(submission_id, status).await {
-        eprintln!("Failed to update status: {}", e);
+    if final_output_for_db.len() > 1000 {
+        final_output_for_db.truncate(1000);
+        final_output_for_db.push_str("\n...[Output Truncated]");
+    }
+
+    if let Err(e) = db
+        .update_submission_result(submission_id, status, &final_output_for_db)
+        .await
+    {
+        eprintln!("\tFailed to update status: {}", e);
     } else {
-        println!("Update status to: {}", status)
+        println!("\tUpdate status to: {}", status)
     }
 }

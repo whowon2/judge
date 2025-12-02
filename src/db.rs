@@ -29,9 +29,15 @@ impl DbClient {
         .await
     }
 
-    pub async fn update_submission_status(&self, id: i32, status: &str) -> Result<()> {
-        sqlx::query("UPDATE submission SET status = $1 WHERE id = $2")
+    pub async fn update_submission_result(
+        &self,
+        id: i32,
+        status: &str,
+        output: &str,
+    ) -> Result<()> {
+        sqlx::query("UPDATE submission SET status = $1, output = $2 WHERE id = $3")
             .bind(status)
+            .bind(output)
             .bind(id)
             .execute(&self.pool)
             .await?;
