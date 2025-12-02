@@ -8,7 +8,10 @@ use aws_config::{BehaviorVersion, meta::region::RegionProviderChain};
 use aws_sdk_sqs::Client;
 use serde::Deserialize;
 
-use crate::db::DbClient;
+use crate::{
+    db::DbClient,
+    models::{JudgeReport, TestCaseResult},
+};
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -98,48 +101,76 @@ async fn process_job(db: &DbClient, submission_id: i32) {
         sub.id, sub.language
     );
 
+    let total_tests = problem.inputs.len();
+    let mut passed_count = 0;
+    let mut failure_details: Option<TestCaseResult> = None;
     let mut all_passed = true;
-    let mut final_output_for_db = String::new();
 
     for (i, input) in problem.inputs.iter().enumerate() {
         let expected = &problem.outputs[i];
+        let time_limit = 2;
 
-        let result = runner::run_python(&sub.code, input).await;
+        // Run code
+        let result = runner::run_python(&sub.code, input, time_limit).await;
         let actual = result.stdout.trim().to_string();
 
-        if result.exit_code != 0 {
+        if result.is_timeout {
             all_passed = false;
-            final_output_for_db = result.stderr;
+            failure_details = Some(TestCaseResult {
+                index: i + 1,
+                input: input.clone(),
+                expected: expected.clone(),
+                actual: "Execution timed out".to_string(),
+                error: Some("Time Limit Exceeded (2s)".to_string()),
+            })
+        } else if result.exit_code != 0 {
+            // CASE 1: Runtime Error (Crash)
+            all_passed = false;
+            failure_details = Some(TestCaseResult {
+                index: i + 1,
+                input: input.clone(), // We save the input that killed it
+                expected: expected.clone(),
+                actual: actual,             // Sometimes partial output exists
+                error: Some(result.stderr), // The Traceback
+            });
             println!("\t❌ Runtime Error on Test {}", i + 1);
-            break;
-        }
-        // Check for Wrong Answer
-        else if actual != expected.trim() {
+            break; // Stop testing
+        } else if actual != expected.trim() {
+            // CASE 2: Wrong Answer
             all_passed = false;
-            final_output_for_db = actual;
+            failure_details = Some(TestCaseResult {
+                index: i + 1,
+                input: input.clone(),
+                expected: expected.clone(),
+                actual: actual,
+                error: None,
+            });
             println!("\t❌ Wrong Answer on Test {}", i + 1);
-            break;
-        }
-
-        // If it's the last test and everything passed, save the last output
-        if i == problem.inputs.len() - 1 {
-            final_output_for_db = actual;
+            break; // Stop testing
+        } else {
+            passed_count += 1;
         }
     }
 
+    // Prepare the Report
+    let report = JudgeReport {
+        passed: all_passed,
+        total_tests,
+        passed_count,
+        failure_details,
+    };
+
+    // Serialize to JSON String
+    let output_json = serde_json::to_string(&report).unwrap_or_default();
     let status = if all_passed { "PASSED" } else { "FAILED" };
 
-    if final_output_for_db.len() > 1000 {
-        final_output_for_db.truncate(1000);
-        final_output_for_db.push_str("\n...[Output Truncated]");
-    }
-
+    // Save to DB
     if let Err(e) = db
-        .update_submission_result(submission_id, status, &final_output_for_db)
+        .update_submission_result(submission_id, status, &output_json)
         .await
     {
-        eprintln!("\tFailed to update status: {}", e);
+        eprintln!("❌ Failed to update DB: {}", e);
     } else {
-        println!("\tUpdate status to: {}", status)
+        println!("\t💾 Result Saved.");
     }
 }
