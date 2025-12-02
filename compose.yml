@@ -4,5 +4,14 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     env_file:
-      - .env
+      - .env.prod
     restart: on-failure
+
+  postgres:
+    image: postgres:latest
+    environment:
+      POSTGRES_USER: judge
+      POSTGRES_PASSWORD: judge
+      POSTGRES_DB: judge
+    ports:
+      - "5433:5432"

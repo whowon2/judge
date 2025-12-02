@@ -1,3 +1,5 @@
+mod db;
+mod models;
 mod runner;
 
 use std::env;
@@ -6,16 +8,25 @@ use aws_config::{BehaviorVersion, meta::region::RegionProviderChain};
 use aws_sdk_sqs::Client;
 use serde::Deserialize;
 
+use crate::db::DbClient;
+
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 struct Job {
-    // question_letter: String,
     submission_id: String,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
+
+    // DB
+    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    println!("Connecting to database...");
+    let db = DbClient::new(&database_url)
+        .await
+        .expect("Failed to connect to DB");
+    println!("Database connected");
 
     // AWS Connection
     let region_provider = RegionProviderChain::default_provider().or_else("sa-east-1");
@@ -26,84 +37,95 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = Client::new(&config);
     let queue_url = env::var("SQS_QUEUE_URL").expect("SQS_QUEUE_URL must be set");
 
-    println!("Worker started. Polling queue {}", queue_url);
+    println!("Worker pulling {}", queue_url);
 
     loop {
         let rcv_result = client
             .receive_message()
             .queue_url(&queue_url)
             .max_number_of_messages(1)
-            .wait_time_seconds(5)
+            .wait_time_seconds(20)
             .send()
             .await;
 
-        match rcv_result {
-            Ok(response) => {
-                if let Some(messages) = response.messages {
-                    for msg in messages {
-                        if let Some(body) = &msg.body {
-                            match serde_json::from_str::<Job>(body) {
-                                Ok(job) => {
-                                    println!("Received Job: {:?}", job.submission_id);
+        if let Ok(response) = rcv_result {
+            if let Some(messages) = response.messages {
+                for msg in messages {
+                    if let Some(body) = &msg.body {
+                        if let Ok(job) = serde_json::from_str::<Job>(body) {
+                            println!("Received Job: {:?}", job.submission_id);
 
-                                    process_job(&job).await;
+                            let sub_id_int: i32 = job.submission_id.parse().unwrap_or(0);
 
-                                    if let Some(receipt_handle) = msg.receipt_handle {
-                                        let _ = client
-                                            .delete_message()
-                                            .queue_url(&queue_url)
-                                            .receipt_handle(receipt_handle)
-                                            .send()
-                                            .await;
-                                    }
-                                }
-                                Err(e) => eprintln!("Failed to parse JSON: {}", e),
+                            process_job(&db, sub_id_int).await;
+
+                            // Delete msg
+                            if let Some(receipt_handle) = msg.receipt_handle {
+                                let _ = client
+                                    .delete_message()
+                                    .queue_url(&queue_url)
+                                    .receipt_handle(receipt_handle)
+                                    .send()
+                                    .await;
                             }
                         }
                     }
                 }
             }
-            Err(e) => println!("AWS SQS Connection Failed: {}", e),
         }
     }
 }
 
-async fn process_job(_job: &Job) {
-    let user_code = r#"
-import sys
+async fn process_job(db: &DbClient, submission_id: i32) {
+    let sub = match db.get_submission(submission_id).await {
+        Ok(submission) => submission,
+        Err(err) => {
+            eprintln!("Failed to fetch submission: {}", err);
+            return;
+        }
+    };
 
-# Read from Stdin
-line = sys.stdin.read()
-if not line:
-    sys.exit(0)
+    let problem = match db.get_problem(sub.problem_id).await {
+        Ok(problem) => problem,
+        Err(err) => {
+            eprintln!("Failed to fetch problem: {}", err);
+            return;
+        }
+    };
 
-parts = line.split()
-a = int(parts[0])
-b = int(parts[1])
+    println!(
+        "\tJudging Submission {} (Language: {})",
+        sub.id, sub.language
+    );
 
-print(a + b)
-"#;
+    let mut all_passed = true;
 
-    let input_case = "10 5";
-    let expected_output = "15";
+    for (i, input) in problem.inputs.iter().enumerate() {
+        let expected = &problem.outputs[i];
 
-    println!("\t🧪 Running Test Case: Input '{}'", input_case);
+        let result = runner::run_python(&sub.code, input).await;
 
-    let result = runner::run_python(user_code, input_case).await;
+        let actual = result.stdout.trim();
 
-    let actual_output = result.stdout.trim();
+        if result.exit_code != 0 || actual != expected.trim() {
+            all_passed = false;
+            println!("Test Case {} Failed", i + 1);
 
-    println!("\t---------------------------");
-    if result.exit_code != 0 {
-        println!("\t❌ RUNTIME ERROR");
-        println!("\tError: {}", result.stderr);
-    } else if actual_output == expected_output {
-        println!("\t✅ PASSED");
-        println!("\tOutput: {}", actual_output);
-    } else {
-        println!("\t❌ WRONG ANSWER");
-        println!("\tExpected: {}", expected_output);
-        println!("\tActual:   {}", actual_output);
+            if result.exit_code != 0 {
+                println!("Exit Code: {}", result.exit_code);
+            } else {
+                println!("Expected Output: {}", expected);
+                println!("Actual Output: {}", actual);
+            }
+            break; // stop on first error
+        }
     }
-    println!("\t---------------------------");
+
+    let status = if all_passed { "PASSED" } else { "FAILED" };
+
+    if let Err(e) = db.update_submission_status(submission_id, status).await {
+        eprintln!("Failed to update status: {}", e);
+    } else {
+        println!("Update status to: {}", status)
+    }
 }

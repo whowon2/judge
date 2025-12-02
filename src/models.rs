@@ -11,7 +11,7 @@ pub struct Submission {
 
 #[derive(Debug, FromRow)]
 pub struct Problem {
-    pub id: i32,
+    // pub id: i32,
     pub inputs: Vec<String>,
     pub outputs: Vec<String>,
     pub difficulty: String,
