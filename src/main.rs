@@ -122,7 +122,10 @@ async fn process_job(db: &DbClient, submission_id: i32) {
                 expected: expected.clone(),
                 actual: "Execution timed out".to_string(),
                 error: Some("Time Limit Exceeded (2s)".to_string()),
-            })
+            });
+
+            println!("\t⏳ TLE on Test {}", i + 1);
+            break;
         } else if result.exit_code != 0 {
             // CASE 1: Runtime Error (Crash)
             all_passed = false;
