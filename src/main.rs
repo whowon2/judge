@@ -1,14 +1,15 @@
-use std::{env, time::Duration};
+mod runner;
+
+use std::env;
 
 use aws_config::{BehaviorVersion, meta::region::RegionProviderChain};
 use aws_sdk_sqs::Client;
 use serde::Deserialize;
-use tokio::time::sleep;
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 struct Job {
-    question_letter: String,
+    // question_letter: String,
     submission_id: String,
 }
 
@@ -43,9 +44,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if let Some(body) = &msg.body {
                             match serde_json::from_str::<Job>(body) {
                                 Ok(job) => {
-                                    println!("Received Job: {:?}", job);
+                                    println!("Received Job: {:?}", job.submission_id);
 
                                     process_job(&job).await;
+
+                                    if let Some(receipt_handle) = msg.receipt_handle {
+                                        let _ = client
+                                            .delete_message()
+                                            .queue_url(&queue_url)
+                                            .receipt_handle(receipt_handle)
+                                            .send()
+                                            .await;
+                                    }
                                 }
                                 Err(e) => eprintln!("Failed to parse JSON: {}", e),
                             }
@@ -58,9 +68,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-async fn process_job(job: &Job) {
-    println!("\tCreating sandbox for submission {}...", job.submission_id);
-    sleep(Duration::from_secs(2)).await;
-    println!("\tJudging answer to question {}", job.question_letter);
-    println!("\tExecution complete.");
+async fn process_job(_job: &Job) {
+    let user_code = r#"
+import sys
+
+# Read from Stdin
+line = sys.stdin.read()
+if not line:
+    sys.exit(0)
+
+parts = line.split()
+a = int(parts[0])
+b = int(parts[1])
+
+print(a + b)
+"#;
+
+    let input_case = "10 5";
+    let expected_output = "15";
+
+    println!("\t🧪 Running Test Case: Input '{}'", input_case);
+
+    let result = runner::run_python(user_code, input_case).await;
+
+    let actual_output = result.stdout.trim();
+
+    println!("\t---------------------------");
+    if result.exit_code != 0 {
+        println!("\t❌ RUNTIME ERROR");
+        println!("\tError: {}", result.stderr);
+    } else if actual_output == expected_output {
+        println!("\t✅ PASSED");
+        println!("\tOutput: {}", actual_output);
+    } else {
+        println!("\t❌ WRONG ANSWER");
+        println!("\tExpected: {}", expected_output);
+        println!("\tActual:   {}", actual_output);
+    }
+    println!("\t---------------------------");
 }
