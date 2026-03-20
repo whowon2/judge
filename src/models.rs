@@ -1,12 +1,13 @@
 use serde::Serialize;
 use sqlx::FromRow;
+use uuid::Uuid;
 
 #[derive(Debug, FromRow)]
 pub struct Submission {
-    pub id: i32,
+    pub id: Uuid,
     pub code: String,
     pub language: String,
-    pub problem_id: i32,
+    pub problem_id: Uuid,
     pub status: String,
 }
 

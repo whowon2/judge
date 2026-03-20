@@ -1,5 +1,6 @@
 use crate::models::{Problem, Submission};
 use sqlx::{PgPool, Result};
+use uuid::Uuid;
 
 pub struct DbClient {
     pool: PgPool,
@@ -11,7 +12,7 @@ impl DbClient {
         Ok(Self { pool })
     }
 
-    pub async fn get_submission(&self, submission_id: i32) -> Result<Submission> {
+    pub async fn get_submission(&self, submission_id: Uuid) -> Result<Submission> {
         sqlx::query_as::<_, Submission>(
             "SELECT id, code, language::text, problem_id, status FROM submission WHERE id = $1",
         )
@@ -20,7 +21,7 @@ impl DbClient {
         .await
     }
 
-    pub async fn get_problem(&self, problem_id: i32) -> Result<Problem> {
+    pub async fn get_problem(&self, problem_id: Uuid) -> Result<Problem> {
         sqlx::query_as::<_, Problem>(
             "SELECT id, inputs, outputs, difficulty::text FROM problem WHERE id = $1",
         )
@@ -31,7 +32,7 @@ impl DbClient {
 
     pub async fn update_submission_result(
         &self,
-        id: i32,
+        id: Uuid,
         status: &str,
         output: &str,
     ) -> Result<()> {

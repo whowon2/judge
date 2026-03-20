@@ -58,9 +58,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if let Ok(job) = serde_json::from_str::<Job>(body) {
                             println!("Received Job: {:?}", job.submission_id);
 
-                            let sub_id_int: i32 = job.submission_id.parse().unwrap_or(0);
-
-                            process_job(&db, sub_id_int).await;
+                            if let Ok(sub_id_uuid) = uuid::Uuid::parse_str(&job.submission_id) {
+                                process_job(&db, sub_id_uuid).await;
+                            } else {
+                                eprintln!("Invalid UUID in job: {}", job.submission_id);
+                            }
 
                             // Delete msg
                             if let Some(receipt_handle) = msg.receipt_handle {
@@ -79,7 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-async fn process_job(db: &DbClient, submission_id: i32) {
+async fn process_job(db: &DbClient, submission_id: uuid::Uuid) {
     let sub = match db.get_submission(submission_id).await {
         Ok(submission) => submission,
         Err(err) => {
