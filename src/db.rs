@@ -1,4 +1,4 @@
-use crate::models::{Problem, Submission};
+use crate::models::{Problem, Submission, SubmissionStatus};
 use sqlx::{PgPool, Result};
 use uuid::Uuid;
 
@@ -23,7 +23,7 @@ impl DbClient {
                  FOR UPDATE SKIP LOCKED 
                  LIMIT 1
              ) 
-             RETURNING id, code, language::text, problem_id, status",
+             RETURNING id, code, language, problem_id, status",
         )
         .fetch_optional(&self.pool)
         .await
@@ -31,7 +31,7 @@ impl DbClient {
 
     pub async fn get_submission(&self, submission_id: Uuid) -> Result<Submission> {
         sqlx::query_as::<_, Submission>(
-            "SELECT id, code, language::text, problem_id, status FROM submission WHERE id = $1",
+            "SELECT id, code, language, problem_id, status FROM submission WHERE id = $1",
         )
         .bind(submission_id)
         .fetch_one(&self.pool)
@@ -40,7 +40,7 @@ impl DbClient {
 
     pub async fn get_problem(&self, problem_id: Uuid) -> Result<Problem> {
         sqlx::query_as::<_, Problem>(
-            "SELECT id, inputs, outputs, difficulty::text FROM problem WHERE id = $1",
+            "SELECT id, inputs, outputs, difficulty FROM problem WHERE id = $1",
         )
         .bind(problem_id)
         .fetch_one(&self.pool)
@@ -50,7 +50,7 @@ impl DbClient {
     pub async fn update_submission_result(
         &self,
         id: Uuid,
-        status: &str,
+        status: SubmissionStatus,
         output: &str,
     ) -> Result<()> {
         sqlx::query("UPDATE submission SET status = $1, output = $2 WHERE id = $3")

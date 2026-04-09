@@ -1,22 +1,50 @@
 use serde::Serialize;
-use sqlx::FromRow;
+use sqlx::{FromRow, Type};
 use uuid::Uuid;
+
+#[derive(Debug, Type, Serialize, PartialEq, Clone, Copy)]
+#[sqlx(type_name = "submission_status", rename_all = "UPPERCASE")]
+pub enum SubmissionStatus {
+    PENDING,
+    PASSED,
+    FAILED,
+    ERROR,
+    RUNNING,
+}
+
+#[derive(Debug, Type, Serialize, PartialEq, Clone, Copy)]
+#[sqlx(type_name = "language", rename_all = "lowercase")]
+pub enum Language {
+    C,
+    Cpp,
+    Java,
+    Python,
+    Rust,
+}
+
+#[derive(Debug, Type, Serialize, PartialEq, Clone, Copy)]
+#[sqlx(type_name = "problem_difficulty", rename_all = "lowercase")]
+pub enum ProblemDifficulty {
+    Easy,
+    Medium,
+    Hard,
+}
 
 #[derive(Debug, FromRow)]
 pub struct Submission {
     pub id: Uuid,
     pub code: String,
-    pub language: String,
+    pub language: Language,
     pub problem_id: Uuid,
-    // pub status: String,
+    pub status: SubmissionStatus,
 }
 
 #[derive(Debug, FromRow)]
 pub struct Problem {
-    // pub id: i32,
+    pub id: Uuid,
     pub inputs: Vec<String>,
     pub outputs: Vec<String>,
-    // pub difficulty: String,
+    pub difficulty: ProblemDifficulty,
 }
 
 #[derive(Serialize)]

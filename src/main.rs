@@ -8,7 +8,7 @@ use tokio::time::{Duration, timeout};
 
 use crate::{
     db::DbClient,
-    models::{JudgeReport, Submission, TestCaseResult},
+    models::{JudgeReport, Submission, SubmissionStatus, TestCaseResult},
 };
 
 #[tokio::main]
@@ -69,7 +69,7 @@ async fn process_job(db: &DbClient, sub: Submission) {
     };
 
     println!(
-        "\tJudging Submission {} (Language: {})",
+        "\tJudging Submission {} (Language: {:?})",
         sub.id, sub.language
     );
 
@@ -80,10 +80,10 @@ async fn process_job(db: &DbClient, sub: Submission) {
 
     for (i, input) in problem.inputs.iter().enumerate() {
         let expected = &problem.outputs[i];
-        let time_limit = 2;
+        let time_limit = 20;
 
         // Run code
-        let result = runner::run_python(&sub.code, input, time_limit).await;
+        let result = runner::run(&sub.code, input, sub.language, time_limit).await;
         let actual = result.stdout.trim().to_string();
 
         if result.is_timeout {
@@ -137,7 +137,11 @@ async fn process_job(db: &DbClient, sub: Submission) {
 
     // Serialize to JSON String
     let output_json = serde_json::to_string(&report).unwrap_or_default();
-    let status = if all_passed { "PASSED" } else { "FAILED" };
+    let status = if all_passed {
+        SubmissionStatus::PASSED
+    } else {
+        SubmissionStatus::FAILED
+    };
 
     // Save to DB
     if let Err(e) = db
