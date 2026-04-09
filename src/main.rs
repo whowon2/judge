@@ -2,22 +2,14 @@ mod db;
 mod models;
 mod runner;
 
+use sqlx::postgres::PgListener;
 use std::env;
-
-use aws_config::{BehaviorVersion, meta::region::RegionProviderChain};
-use aws_sdk_sqs::Client;
-use serde::Deserialize;
+use tokio::time::{Duration, timeout};
 
 use crate::{
     db::DbClient,
-    models::{JudgeReport, TestCaseResult},
+    models::{JudgeReport, Submission, TestCaseResult},
 };
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-struct Job {
-    submission_id: String,
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -31,65 +23,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("Failed to connect to DB");
     println!("Database connected");
 
-    // AWS Connection
-    let region_provider = RegionProviderChain::default_provider().or_else("sa-east-1");
-    let config = aws_config::defaults(BehaviorVersion::latest())
-        .region(region_provider)
-        .load()
-        .await;
-    let client = Client::new(&config);
-    let queue_url = env::var("SQS_QUEUE_URL").expect("SQS_QUEUE_URL must be set");
-
-    println!("Worker pulling {}", queue_url);
+    // PgListener
+    let mut listener = PgListener::connect(&database_url).await?;
+    listener.listen("new_submission").await?;
+    println!("Listening for 'new_submission' notifications...");
 
     loop {
-        let rcv_result = client
-            .receive_message()
-            .queue_url(&queue_url)
-            .max_number_of_messages(1)
-            .wait_time_seconds(20)
-            .send()
-            .await;
+        // 1. Try to fetch any pending submission (drains any existing queue)
+        println!("Checking for pending jobs...");
+        while let Ok(Some(sub)) = db.get_next_submission().await {
+            println!("Processing submission: {}", sub.id);
+            process_job(&db, sub).await;
+        }
 
-        if let Ok(response) = rcv_result {
-            if let Some(messages) = response.messages {
-                for msg in messages {
-                    if let Some(body) = &msg.body {
-                        if let Ok(job) = serde_json::from_str::<Job>(body) {
-                            println!("Received Job: {:?}", job.submission_id);
+        // 2. No more jobs? Wait for a notification OR a periodic sweep (60s)
+        println!("No pending jobs. Sleeping until notification...");
 
-                            if let Ok(sub_id_uuid) = uuid::Uuid::parse_str(&job.submission_id) {
-                                process_job(&db, sub_id_uuid).await;
-                            } else {
-                                eprintln!("Invalid UUID in job: {}", job.submission_id);
-                            }
+        let wait_result = timeout(Duration::from_secs(60), listener.recv()).await;
 
-                            // Delete msg
-                            if let Some(receipt_handle) = msg.receipt_handle {
-                                let _ = client
-                                    .delete_message()
-                                    .queue_url(&queue_url)
-                                    .receipt_handle(receipt_handle)
-                                    .send()
-                                    .await;
-                            }
-                        }
-                    }
-                }
+        match wait_result {
+            Ok(Ok(notification)) => {
+                println!(
+                    "Woke up! Received notification on channel: {}",
+                    notification.channel()
+                );
+            }
+            Ok(Err(e)) => {
+                eprintln!("Listener error: {}", e);
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
+            Err(_) => {
+                println!("Periodic sweep (60s timeout reached)");
             }
         }
     }
 }
 
-async fn process_job(db: &DbClient, submission_id: uuid::Uuid) {
-    let sub = match db.get_submission(submission_id).await {
-        Ok(submission) => submission,
-        Err(err) => {
-            eprintln!("Failed to fetch submission {}: {}", submission_id, err);
-            return;
-        }
-    };
-
+async fn process_job(db: &DbClient, sub: Submission) {
     let problem = match db.get_problem(sub.problem_id).await {
         Ok(problem) => problem,
         Err(err) => {
@@ -171,7 +141,7 @@ async fn process_job(db: &DbClient, submission_id: uuid::Uuid) {
 
     // Save to DB
     if let Err(e) = db
-        .update_submission_result(submission_id, status, &output_json)
+        .update_submission_result(sub.id, status, &output_json)
         .await
     {
         eprintln!("❌ Failed to update DB: {}", e);

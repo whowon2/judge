@@ -8,7 +8,7 @@ pub struct Submission {
     pub code: String,
     pub language: String,
     pub problem_id: Uuid,
-    pub status: String,
+    // pub status: String,
 }
 
 #[derive(Debug, FromRow)]
@@ -16,7 +16,7 @@ pub struct Problem {
     // pub id: i32,
     pub inputs: Vec<String>,
     pub outputs: Vec<String>,
-    pub difficulty: String,
+    // pub difficulty: String,
 }
 
 #[derive(Serialize)]

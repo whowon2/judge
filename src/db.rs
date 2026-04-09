@@ -12,6 +12,23 @@ impl DbClient {
         Ok(Self { pool })
     }
 
+    pub async fn get_next_submission(&self) -> Result<Option<Submission>> {
+        sqlx::query_as::<_, Submission>(
+            "UPDATE submission 
+             SET status = 'RUNNING' 
+             WHERE id = (
+                 SELECT id FROM submission 
+                 WHERE status = 'PENDING' 
+                 ORDER BY created_at ASC 
+                 FOR UPDATE SKIP LOCKED 
+                 LIMIT 1
+             ) 
+             RETURNING id, code, language::text, problem_id, status",
+        )
+        .fetch_optional(&self.pool)
+        .await
+    }
+
     pub async fn get_submission(&self, submission_id: Uuid) -> Result<Submission> {
         sqlx::query_as::<_, Submission>(
             "SELECT id, code, language::text, problem_id, status FROM submission WHERE id = $1",
