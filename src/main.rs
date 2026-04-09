@@ -145,7 +145,7 @@ async fn process_job(db: &DbClient, sub: Submission) {
 
     // Save to DB
     if let Err(e) = db
-        .update_submission_result(sub.id, status, &output_json)
+        .update_submission_result(&sub, status, &output_json)
         .await
     {
         eprintln!("❌ Failed to update DB: {}", e);

@@ -37,6 +37,9 @@ pub struct Submission {
     pub language: Language,
     pub problem_id: Uuid,
     pub status: SubmissionStatus,
+    pub user_id: String,
+    pub contest_id: Uuid,
+    pub question_letter: String,
 }
 
 #[derive(Debug, FromRow)]
