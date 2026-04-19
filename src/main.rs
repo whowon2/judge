@@ -117,7 +117,7 @@ async fn process_job(db: &DbClient, sub: Submission) {
             });
             println!("\t❌ Runtime Error on Test {}", i + 1);
             break; // Stop testing
-        } else if actual != expected.trim() {
+        } else if actual.trim() != expected.trim() {
             // CASE 2: Wrong Answer
             all_passed = false;
             failure_details = Some(TestCaseResult {

@@ -46,11 +46,12 @@ pub async fn run_python(code: &str, input_data: &str, time_limit_secs: u64) -> E
 pub async fn run_portugol(code: &str, input_data: &str, time_limit_secs: u64) -> ExecutionResult {
     let b64_code = general_purpose::STANDARD.encode(code);
     let shell_command = format!(
-        "echo \"{}\" | base64 -d > script.por && java -cp /portugol/portugol-console.jar:/portugol/lib/* br.univali.portugol.Console -no-wait script.por",
+        "echo \"{}\" | base64 -d > script.por && java -jar /portugol/portugol-console.jar -no-wait script.por",
         b64_code
     );
 
-    run_in_docker("portugol:latest", &shell_command, input_data, time_limit_secs).await
+    let normalized_input = input_data.split_whitespace().collect::<Vec<_>>().join("\n");
+    run_in_docker("portugol:latest", &shell_command, &normalized_input, time_limit_secs).await
 }
 
 pub async fn run_cpp(code: &str, input_data: &str, time_limit_secs: u64) -> ExecutionResult {

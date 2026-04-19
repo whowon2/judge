@@ -8,7 +8,7 @@ WORKDIR /build
 
 RUN ./gradlew :portugol-console:jar
 
-FROM eclipse-temurin:21-jre-alpine
+FROM eclipse-temurin:21-jdk-alpine
 
 WORKDIR /portugol
 
