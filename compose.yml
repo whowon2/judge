@@ -1,4 +1,9 @@
 services:
+  portugol:
+    build: ./portugol
+    image: portugol:latest
+    command: echo "Portugol image ready"
+
   judge-worker:
     build: .
     volumes:

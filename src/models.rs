@@ -19,6 +19,7 @@ pub enum Language {
     Cpp,
     Java,
     Python,
+    Portugol,
     Rust,
 }
 

@@ -18,6 +18,7 @@ pub async fn run(code: &str, input_data: &str, language: Language, time_limit_se
         Language::Python => run_python(code, input_data, time_limit_secs).await,
         Language::Rust => run_rust(code, input_data, time_limit_secs).await,
         Language::Cpp => run_cpp(code, input_data, time_limit_secs).await,
+        Language::Portugol => run_portugol(code, input_data, time_limit_secs).await,
         Language::C => run_not_implemented("C"),
         Language::Java => run_not_implemented("Java"),
     }
@@ -40,6 +41,16 @@ pub async fn run_python(code: &str, input_data: &str, time_limit_secs: u64) -> E
     );
     
     run_in_docker("python:3.9-slim", &shell_command, input_data, time_limit_secs).await
+}
+
+pub async fn run_portugol(code: &str, input_data: &str, time_limit_secs: u64) -> ExecutionResult {
+    let b64_code = general_purpose::STANDARD.encode(code);
+    let shell_command = format!(
+        "echo \"{}\" | base64 -d > script.por && java -cp /portugol/portugol-console.jar:/portugol/lib/* br.univali.portugol.Console -no-wait script.por",
+        b64_code
+    );
+
+    run_in_docker("portugol:latest", &shell_command, input_data, time_limit_secs).await
 }
 
 pub async fn run_cpp(code: &str, input_data: &str, time_limit_secs: u64) -> ExecutionResult {
