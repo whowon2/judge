@@ -23,24 +23,15 @@ impl DbClient {
                  FOR UPDATE SKIP LOCKED 
                  LIMIT 1
              ) 
-             RETURNING id, code, language, problem_id, status, user_id, contest_id, question_letter",
+             RETURNING id, code, language, problem_id, user_id, contest_id, question_letter",
         )
         .fetch_optional(&self.pool)
         .await
     }
 
-    pub async fn get_submission(&self, submission_id: Uuid) -> Result<Submission> {
-        sqlx::query_as::<_, Submission>(
-            "SELECT id, code, language, problem_id, status, user_id, contest_id, question_letter FROM submission WHERE id = $1",
-        )
-        .bind(submission_id)
-        .fetch_one(&self.pool)
-        .await
-    }
-
     pub async fn get_problem(&self, problem_id: Uuid) -> Result<Problem> {
         sqlx::query_as::<_, Problem>(
-            "SELECT id, inputs, outputs, difficulty FROM problem WHERE id = $1",
+            "SELECT inputs, outputs FROM problem WHERE id = $1",
         )
         .bind(problem_id)
         .fetch_one(&self.pool)

@@ -22,13 +22,6 @@ pub enum Language {
     Rust,
 }
 
-#[derive(Debug, Type, Serialize, PartialEq, Clone, Copy)]
-#[sqlx(type_name = "problem_difficulty", rename_all = "lowercase")]
-pub enum ProblemDifficulty {
-    Easy,
-    Medium,
-    Hard,
-}
 
 #[derive(Debug, FromRow)]
 pub struct Submission {
@@ -36,7 +29,6 @@ pub struct Submission {
     pub code: String,
     pub language: Language,
     pub problem_id: Uuid,
-    pub status: SubmissionStatus,
     pub user_id: String,
     pub contest_id: Uuid,
     pub question_letter: String,
@@ -44,10 +36,8 @@ pub struct Submission {
 
 #[derive(Debug, FromRow)]
 pub struct Problem {
-    pub id: Uuid,
     pub inputs: Vec<String>,
     pub outputs: Vec<String>,
-    pub difficulty: ProblemDifficulty,
 }
 
 #[derive(Serialize)]
