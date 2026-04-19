@@ -60,13 +60,14 @@ async fn run_in_docker(
 ) -> ExecutionResult {
     println!("   🐳 Spawning Docker Container ({})", image);
 
-    let mut child = Command::new("docker")
+    let mut child = match Command::new("docker")
         .args(&[
             "run",
             "--rm",
             "-i",
             "--network", "none",
             "--memory", "128m",
+            "--cpus", "0.5",
             image,
             "sh", "-c", shell_command,
         ])
@@ -75,7 +76,18 @@ async fn run_in_docker(
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
-        .expect("Failed to spawn docker process");
+    {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Failed to spawn Docker container: {}", e);
+            return ExecutionResult {
+                stdout: String::new(),
+                stderr: format!("Internal error: failed to start runner ({})", e),
+                exit_code: -1,
+                is_timeout: false,
+            };
+        }
+    };
 
     if let Some(mut stdin) = child.stdin.take() {
         let input_bytes = input_data.as_bytes().to_vec();
@@ -87,12 +99,18 @@ async fn run_in_docker(
     let duration = Duration::from_secs(time_limit_secs);
 
     match timeout(duration, child.wait_with_output()).await {
-        Ok(run_result) => {
-            let output = run_result.expect("Failed to read stdout");
+        Ok(Ok(output)) => ExecutionResult {
+            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+            exit_code: output.status.code().unwrap_or(-1),
+            is_timeout: false,
+        },
+        Ok(Err(e)) => {
+            eprintln!("Failed to read container output: {}", e);
             ExecutionResult {
-                stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-                stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-                exit_code: output.status.code().unwrap_or(-1),
+                stdout: String::new(),
+                stderr: format!("Internal error: failed to read runner output ({})", e),
+                exit_code: -1,
                 is_timeout: false,
             }
         }

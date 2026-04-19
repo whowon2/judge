@@ -79,7 +79,14 @@ async fn process_job(db: &DbClient, sub: Submission) {
     let mut all_passed = true;
 
     for (i, input) in problem.inputs.iter().enumerate() {
-        let expected = &problem.outputs[i];
+        let expected = match problem.outputs.get(i) {
+            Some(o) => o,
+            None => {
+                eprintln!("Problem {} missing expected output for test case {}", sub.problem_id, i + 1);
+                all_passed = false;
+                break;
+            }
+        };
         let time_limit = 20;
 
         // Run code
@@ -93,7 +100,7 @@ async fn process_job(db: &DbClient, sub: Submission) {
                 input: input.clone(),
                 expected: expected.clone(),
                 actual: "Execution timed out".to_string(),
-                error: Some("Time Limit Exceeded (2s)".to_string()),
+                error: Some(format!("Time Limit Exceeded ({}s)", time_limit)),
             });
 
             println!("\t⏳ TLE on Test {}", i + 1);
