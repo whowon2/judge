@@ -36,7 +36,7 @@ Three files, straight-line flow, no framework:
 
 ### Adding a new language
 
-Add a variant to `Language` in `models.rs` matching the DB enum, add a `run_<lang>` fn in `runner.rs` following the existing pattern (base64 the source, write+compile+run in one shell command, delegate to `run_in_docker` with the right image), and wire it into the `match` in `runner::run`. `Language::C` and `Language::Java` currently exist as DB enum variants but hit `run_not_implemented` — no runner written yet.
+Add a variant to `Language` in `models.rs` matching the DB enum, add a `run_<lang>` fn in `runner.rs` following the existing pattern (base64 the source, write+compile+run in one shell command, delegate to `run_in_docker` with the right image), and wire it into the `match` in `runner::run`. All six DB enum variants (`C`, `Cpp`, `Java`, `Python`, `Portugol`, `Rust`) have runners. `Java` submissions must define `public class Main` (the shell command writes source to `Main.java`).
 
 ### Docker-in-Docker
 
