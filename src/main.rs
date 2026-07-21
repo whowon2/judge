@@ -29,11 +29,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Listening for 'new_submission' notifications...");
 
     loop {
-        // 1. Try to fetch any pending submission (drains any existing queue)
+        // 0. Dead-letter submissions abandoned by a crashed/killed worker that
+        // already exhausted their retry budget, so they aren't reclaimed below.
+        match db.reap_exhausted_submissions().await {
+            Ok(n) if n > 0 => println!("Dead-lettered {} exhausted submission(s)", n),
+            Ok(_) => {}
+            Err(e) => eprintln!("Failed to reap exhausted submissions: {}", e),
+        }
+
+        // 1. Try to fetch any pending (or crashed-worker-abandoned) submission
         println!("Checking for pending jobs...");
-        while let Ok(Some(sub)) = db.get_next_submission().await {
-            println!("Processing submission: {}", sub.id);
-            process_job(&db, sub).await;
+        loop {
+            match db.get_next_submission().await {
+                Ok(Some(sub)) => {
+                    if sub.retry_count > 0 {
+                        println!(
+                            "Processing submission: {} (retry {}/{})",
+                            sub.id, sub.retry_count, db::MAX_RETRIES
+                        );
+                    } else {
+                        println!("Processing submission: {}", sub.id);
+                    }
+                    process_job(&db, sub).await;
+                }
+                Ok(None) => break,
+                Err(e) => {
+                    eprintln!("Failed to fetch next submission: {}", e);
+                    break;
+                }
+            }
         }
 
         // 2. No more jobs? Wait for a notification OR a periodic sweep (60s)

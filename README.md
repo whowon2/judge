@@ -1,23 +1,22 @@
 # ⚖️ Judge: Remote Code Execution Service
 
-This is the worker service for the Runner platform. It processes submitted code evaluations by picking up jobs from an AWS SQS queue, running the code in an isolated Docker sandbox, and updating the submission results in the PostgreSQL database.
+This is the worker service for the Runner platform. It polls PostgreSQL for submitted code evaluations, runs the code in an isolated Docker sandbox, and writes the results back to the database.
 
 ## 🏗️ Stack
 
 - **Language:** Rust (Edition 2024)
 - **Async Runtime:** [Tokio](https://tokio.rs/)
 - **Database driver:** [sqlx](https://github.com/launchbadge/sqlx) (PostgreSQL asynchronous driver)
-- **Queue:** AWS SDK for Rust (SQS)
-- **Sandboxing:** Docker via `tokio::process::Command` (running `python:3.9-slim` with memory limits and no network access)
+- **Sandboxing:** Docker via `tokio::process::Command` (per-language images with memory/CPU limits and no network access)
 
 ## ⚙️ How it Works
 
-1. The Judge continuously polls the designated AWS SQS queue using long-polling.
-2. Upon receiving a job containing a `submission_id`, it fetches the submitted code and problem information/test cases from the Postgres database.
-3. It spawns a process to run the submitted Python code inside a low-privilege, network-less Docker container, passing the code via base64 encoded streams.
+1. The Judge listens for Postgres `LISTEN/NOTIFY` on the `new_submission` channel and does a periodic sweep every 60s as a fallback, then claims `PENDING` submissions with `UPDATE ... FOR UPDATE SKIP LOCKED` (safe across multiple judge-worker replicas).
+2. Submissions abandoned mid-job by a crashed or killed worker (stuck `RUNNING`) are reclaimed and retried up to a fixed retry limit, then dead-lettered to `ERROR` if still stuck.
+3. It fetches the submitted code and problem test cases from Postgres, then spawns a sandboxed, network-less Docker container per test case to run the code, passing input via base64-encoded streams.
 4. The code is executed against each test case's input, and `stdout` is compared with the expected output.
-5. Constraints (e.g. 2s Time Limit Exceeded) and process crashes (Runtime Errors) are managed gracefully.
-6. The compiled results (`PASSED`, `FAILED`, `TLE`) and traceback details are serialized into JSON and saved back to the database.
+5. Constraints (Time Limit Exceeded), compile errors, and runtime crashes are each reported distinctly.
+6. The compiled results (`PASSED`, `FAILED`, `ERROR`) and failure details are serialized into JSON and saved back to the database.
 
 ## 🚀 Getting Started
 
@@ -25,8 +24,7 @@ This is the worker service for the Runner platform. It processes submitted code 
 
 - [Rust & Cargo](https://rustup.rs/) (Stable toolchain)
 - [Docker](https://www.docker.com/) installed and running on the host machine.
-- PostgreSQL Database (running locally or via the root `docker-compose.yml`)
-- AWS SQS Queue
+- PostgreSQL Database (running locally or via the root `compose.yml`)
 
 ### Environment Variables
 
@@ -34,10 +32,6 @@ Create a `.env` file inside the `judge` directory. Note that the `.env` footprin
 
 ```env
 DATABASE_URL=postgres://user:password@localhost/runner
-SQS_QUEUE_URL=https://sqs.sa-east-1.amazonaws.com/your-account-id/your-queue-name
-AWS_ACCESS_KEY_ID=your_aws_key
-AWS_SECRET_ACCESS_KEY=your_aws_secret
-AWS_REGION=sa-east-1
 ```
 
 ### Running Locally

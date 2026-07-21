@@ -33,6 +33,7 @@ pub struct Submission {
     pub user_id: String,
     pub contest_id: Uuid,
     pub question_letter: String,
+    pub retry_count: i32,
 }
 
 #[derive(Debug, FromRow)]

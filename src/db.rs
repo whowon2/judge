@@ -2,6 +2,14 @@ use crate::models::{Problem, Submission, SubmissionStatus};
 use sqlx::{PgPool, Result};
 use uuid::Uuid;
 
+/// A submission stuck in RUNNING for longer than this was almost certainly
+/// left behind by a worker that crashed or was killed mid-job.
+const STALE_RUNNING_THRESHOLD: &str = "5 minutes";
+
+/// Stale jobs get re-claimed and retried up to this many times before being
+/// dead-lettered (moved to ERROR) instead of retried forever.
+pub const MAX_RETRIES: i32 = 3;
+
 pub struct DbClient {
     pool: PgPool,
 }
@@ -12,19 +20,45 @@ impl DbClient {
         Ok(Self { pool })
     }
 
+    /// Dead-letters submissions that have been RUNNING since before a crashed
+    /// worker claimed them, and have already exhausted their retry budget.
+    /// Must run before `get_next_submission` so exhausted rows are not
+    /// picked up again.
+    pub async fn reap_exhausted_submissions(&self) -> Result<u64> {
+        let result = sqlx::query(&format!(
+            "UPDATE submission
+             SET status = 'ERROR',
+                 output = 'Dead-lettered: exceeded {} retries after repeated worker crash/timeout'
+             WHERE status = 'RUNNING'
+               AND retry_count >= $1
+               AND updated_at < now() - interval '{}'",
+            MAX_RETRIES, STALE_RUNNING_THRESHOLD
+        ))
+        .bind(MAX_RETRIES)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected())
+    }
+
     pub async fn get_next_submission(&self) -> Result<Option<Submission>> {
-        sqlx::query_as::<_, Submission>(
-            "UPDATE submission 
-             SET status = 'RUNNING' 
+        sqlx::query_as::<_, Submission>(&format!(
+            "UPDATE submission
+             SET status = 'RUNNING',
+                 updated_at = now(),
+                 retry_count = CASE WHEN status = 'RUNNING' THEN retry_count + 1 ELSE retry_count END
              WHERE id = (
-                 SELECT id FROM submission 
-                 WHERE status = 'PENDING' 
-                 ORDER BY created_at ASC 
-                 FOR UPDATE SKIP LOCKED 
+                 SELECT id FROM submission
+                 WHERE status = 'PENDING'
+                    OR (status = 'RUNNING' AND retry_count < $1 AND updated_at < now() - interval '{}')
+                 ORDER BY created_at ASC
+                 FOR UPDATE SKIP LOCKED
                  LIMIT 1
-             ) 
-             RETURNING id, code, language, problem_id, user_id, contest_id, question_letter",
-        )
+             )
+             RETURNING id, code, language, problem_id, user_id, contest_id, question_letter, retry_count",
+            STALE_RUNNING_THRESHOLD
+        ))
+        .bind(MAX_RETRIES)
         .fetch_optional(&self.pool)
         .await
     }
