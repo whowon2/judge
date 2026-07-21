@@ -105,6 +105,18 @@ async fn process_job(db: &DbClient, sub: Submission) {
 
             println!("\t⏳ TLE on Test {}", i + 1);
             break;
+        } else if result.is_compile_error {
+            all_passed = false;
+            failure_details = Some(TestCaseResult {
+                index: i + 1,
+                input: input.clone(),
+                expected: expected.clone(),
+                actual: String::new(),
+                error: Some(format!("Compilation Error:\n{}", result.stderr)),
+            });
+
+            println!("\t🛠️ Compile Error on Test {}", i + 1);
+            break;
         } else if result.exit_code != 0 {
             // CASE 1: Runtime Error (Crash)
             all_passed = false;
